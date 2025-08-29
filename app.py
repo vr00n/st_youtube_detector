@@ -29,20 +29,33 @@ def load_yolo_model():
 # --- Stream URL Fetching ---
 def get_stream_url(youtube_url):
     """
-    Uses yt-dlp to extract the direct stream URL from a YouTube URL.
-    Specifies a format that OpenCV can reliably handle.
+    Uses yt-dlp to extract the best available direct stream URL from a YouTube URL
+    that OpenCV can likely handle by iterating through available formats.
     """
     ydl_opts = {
-        # Request the best quality format that is a direct MP4 file, which is more compatible with OpenCV
-        'format': 'best[ext=mp4]/best',
         'quiet': True,
+        'noplaylist': True,
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(youtube_url, download=False)
-            return info_dict.get('url', None), info_dict.get('title', 'Untitled Stream')
+            stream_title = info_dict.get('title', 'Untitled Stream')
+
+            # Iterate through available formats in reverse (best quality first)
+            for f in reversed(info_dict.get('formats', [])):
+                # Look for a format with a direct URL and a video codec
+                if f.get('url') and f.get('vcodec') != 'none':
+                    return f['url'], stream_title
+
+            # Fallback if the above loop doesn't find a suitable format
+            if info_dict.get('url'):
+                 return info_dict.get('url'), stream_title
+
+            st.error("yt-dlp error: No compatible video stream URL found in the available formats.")
+            return None, None
+
     except Exception as e:
-        st.error(f"yt-dlp error: Could not fetch stream info. The stream may not be available in a compatible format. Error: {e}")
+        st.error(f"yt-dlp error: Could not fetch stream info. The stream may not be live, is region-restricted, or is in an unsupported format. Error: {e}")
         return None, None
 
 # --- Main App Logic ---
@@ -74,7 +87,7 @@ if st.button("Start Analysis", type="primary"):
         st.session_state.captures = [] # Clear previous captures on new run
         st.session_state.cooldowns = {}
         
-        with st.spinner('Attempting to open stream...'):
+        with st.spinner('Searching for a compatible video stream...'):
             stream_url, stream_title = get_stream_url(url)
 
         if stream_url:
@@ -100,7 +113,7 @@ if st.button("Start Analysis", type="primary"):
                         st.write("The video stream has ended or was interrupted.")
                         break
 
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frame_rgb = cv2.cvtColor(frame, cv.COLOR_BGR2RGB)
                     results = model(frame_rgb)
                     predictions = results.pandas().xyxy[0]
                     current_time = time.time()
@@ -133,9 +146,6 @@ if st.button("Start Analysis", type="primary"):
                     video_placeholder.image(frame, channels="BGR", use_column_width=True)
 
                     with captures_placeholder:
-                        # This part can be slow if redrawn constantly. Let's optimize.
-                        # We can rebuild the capture list only when a new one is added.
-                        # For now, keeping it simple.
                         if not st.session_state.captures:
                             st.info("No hot objects detected yet...")
                         else:
