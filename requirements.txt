@@ -7,3 +7,4 @@ Pillow
 ultralytics
 yt-dlp
 tqdm
+seaborn
