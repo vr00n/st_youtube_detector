@@ -30,7 +30,8 @@ def load_yolo_model():
 def get_stream_url(youtube_url):
     """
     Uses yt-dlp to extract the best available direct stream URL from a YouTube URL
-    that OpenCV can likely handle by iterating through available formats.
+    that OpenCV can likely handle by iterating through available formats and filtering out
+    incompatible manifest types (like HLS/DASH).
     """
     ydl_opts = {
         'quiet': True,
@@ -41,13 +42,16 @@ def get_stream_url(youtube_url):
             info_dict = ydl.extract_info(youtube_url, download=False)
             stream_title = info_dict.get('title', 'Untitled Stream')
 
-            # Iterate through available formats in reverse (best quality first)
+            # Iterate through available formats, prioritizing direct HTTP links
             for f in reversed(info_dict.get('formats', [])):
-                # Look for a format with a direct URL and a video codec
-                if f.get('url') and f.get('vcodec') != 'none':
-                    return f['url'], stream_title
+                protocol = f.get('protocol')
+                # Explicitly filter out manifest protocols that OpenCV struggles with
+                if protocol is not None and 'm3u8' not in protocol and 'dash' not in protocol:
+                    if f.get('url') and f.get('vcodec') != 'none':
+                        return f['url'], stream_title
 
-            # Fallback if the above loop doesn't find a suitable format
+            # Fallback for cases where only manifest URLs are available (less reliable)
+            st.warning("Could not find a direct stream link. Trying a fallback method which may not be stable.")
             if info_dict.get('url'):
                  return info_dict.get('url'), stream_title
 
@@ -113,7 +117,7 @@ if st.button("Start Analysis", type="primary"):
                         st.write("The video stream has ended or was interrupted.")
                         break
 
-                    frame_rgb = cv2.cvtColor(frame, cv.COLOR_BGR2RGB)
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     results = model(frame_rgb)
                     predictions = results.pandas().xyxy[0]
                     current_time = time.time()
