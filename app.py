@@ -29,38 +29,35 @@ def load_yolo_model():
 # --- Stream URL Fetching ---
 def get_stream_url(youtube_url):
     """
-    Uses yt-dlp to extract the best available direct stream URL from a YouTube URL
-    that OpenCV can likely handle by iterating through available formats and filtering out
-    incompatible manifest types (like HLS/DASH).
+    Uses yt-dlp to extract the direct stream URL from a YouTube URL.
+    This version uses a specific format selector to find a stream that is
+    highly compatible with OpenCV, avoiding HLS/DASH manifest URLs.
     """
     ydl_opts = {
+        # Forcefully request a direct MP4 stream.
+        # 'bv' = best video, 'ba' = best audio, 'b' = best combined stream.
+        # The selector prioritizes a muxed mp4 file, which is ideal for OpenCV.
+        'format': 'bv[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best',
         'quiet': True,
-        'noplaylist': True,
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(youtube_url, download=False)
             stream_title = info_dict.get('title', 'Untitled Stream')
 
-            # Iterate through available formats, prioritizing direct HTTP links
-            for f in reversed(info_dict.get('formats', [])):
-                protocol = f.get('protocol')
-                # Explicitly filter out manifest protocols that OpenCV struggles with
-                if protocol is not None and 'm3u8' not in protocol and 'dash' not in protocol:
-                    if f.get('url') and f.get('vcodec') != 'none':
-                        return f['url'], stream_title
+            # The URL should be directly available with the specified format
+            url = info_dict.get('url', None)
 
-            # Fallback for cases where only manifest URLs are available (less reliable)
-            st.warning("Could not find a direct stream link. Trying a fallback method which may not be stable.")
-            if info_dict.get('url'):
-                 return info_dict.get('url'), stream_title
-
-            st.error("yt-dlp error: No compatible video stream URL found in the available formats.")
-            return None, None
+            if url:
+                return url, stream_title
+            else:
+                 st.error("yt-dlp error: Could not extract a compatible stream URL. The video might not have an mp4 format available.")
+                 return None, None
 
     except Exception as e:
-        st.error(f"yt-dlp error: Could not fetch stream info. The stream may not be live, is region-restricted, or is in an unsupported format. Error: {e}")
+        st.error(f"yt-dlp error: Could not fetch stream info. The stream may be private, region-restricted, or have formats that are not compatible. Error: {e}")
         return None, None
+
 
 # --- Main App Logic ---
 st.set_page_config(layout="wide", page_title="Hot or Not AI Detector")
@@ -68,7 +65,7 @@ st.set_page_config(layout="wide", page_title="Hot or Not AI Detector")
 st.title("🔥 Hot or Not AI Object Detector")
 st.markdown("""
 This application uses the YOLOv5 model to perform real-time object detection on a YouTube live stream.
-It has been updated to use `yt-dlp` with specific formats for improved reliability with OpenCV.
+It has been updated with a more robust method to find OpenCV-compatible stream URLs.
 """)
 
 model = load_yolo_model()
@@ -97,7 +94,7 @@ if st.button("Start Analysis", type="primary"):
         if stream_url:
             cap = cv2.VideoCapture(stream_url)
             if not cap.isOpened():
-                st.error("Error: Could not open video stream. Please check the URL and try another one.")
+                st.error("Error: Could not open video stream. Even with the new method, this stream is not accessible. Please try another URL.")
             else:
                 st.success(f"Successfully opened stream: **{stream_title}**")
                 col1, col2 = st.columns([2, 1])
