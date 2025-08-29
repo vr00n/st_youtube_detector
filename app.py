@@ -23,16 +23,18 @@ def load_yolo_model():
         return model
     except Exception as e:
         st.error(f"Error loading YOLOv5 model: {e}")
-        st.error("Please ensure you have an active internet connection to download the model.")
+        st.error("Please ensure you have an active internet connection and all dependencies from requirements.txt are installed.")
         return None
 
 # --- Stream URL Fetching ---
 def get_stream_url(youtube_url):
     """
     Uses yt-dlp to extract the direct stream URL from a YouTube URL.
+    Specifies a format that OpenCV can reliably handle.
     """
     ydl_opts = {
-        'format': 'best',
+        # Request the best quality format that is a direct MP4 file, which is more compatible with OpenCV
+        'format': 'best[ext=mp4]/best',
         'quiet': True,
     }
     try:
@@ -40,7 +42,7 @@ def get_stream_url(youtube_url):
             info_dict = ydl.extract_info(youtube_url, download=False)
             return info_dict.get('url', None), info_dict.get('title', 'Untitled Stream')
     except Exception as e:
-        st.error(f"yt-dlp error: Could not fetch stream info. Is the URL correct? Error: {e}")
+        st.error(f"yt-dlp error: Could not fetch stream info. The stream may not be available in a compatible format. Error: {e}")
         return None, None
 
 # --- Main App Logic ---
@@ -49,7 +51,7 @@ st.set_page_config(layout="wide", page_title="Hot or Not AI Detector")
 st.title("🔥 Hot or Not AI Object Detector")
 st.markdown("""
 This application uses the YOLOv5 model to perform real-time object detection on a YouTube live stream.
-It has been updated to use `yt-dlp` for improved reliability.
+It has been updated to use `yt-dlp` with specific formats for improved reliability with OpenCV.
 """)
 
 model = load_yolo_model()
@@ -69,7 +71,11 @@ if st.button("Start Analysis", type="primary"):
     if not url:
         st.warning("Please enter a URL.")
     else:
-        stream_url, stream_title = get_stream_url(url)
+        st.session_state.captures = [] # Clear previous captures on new run
+        st.session_state.cooldowns = {}
+        
+        with st.spinner('Attempting to open stream...'):
+            stream_url, stream_title = get_stream_url(url)
 
         if stream_url:
             cap = cv2.VideoCapture(stream_url)
@@ -127,10 +133,14 @@ if st.button("Start Analysis", type="primary"):
                     video_placeholder.image(frame, channels="BGR", use_column_width=True)
 
                     with captures_placeholder:
+                        # This part can be slow if redrawn constantly. Let's optimize.
+                        # We can rebuild the capture list only when a new one is added.
+                        # For now, keeping it simple.
                         if not st.session_state.captures:
                             st.info("No hot objects detected yet...")
                         else:
-                            for capture in st.session_state.captures:
+                            # To prevent the list from growing indefinitely, let's cap it
+                            for capture in st.session_state.captures[:20]: # Show latest 20
                                 st.image(capture['image'], caption=f"{capture['class_name'].capitalize()} ({capture['hotness']:.2f}) at {capture['timestamp']}", use_column_width=True)
                 
                 cap.release()
